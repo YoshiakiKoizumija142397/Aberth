@@ -1,167 +1,602 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>MethodDka - High Precision</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.4.3/decimal.min.js"></script>
+  <meta charset="utf-8" />
+  <title>Aberth法（最大次数1000）高精度 多項式根計算デモ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: Arial, sans-serif; }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f9f9f9;
-      border-radius: 8px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    :root { --fg:#111; --bg:#fafafa; --muted:#666; --accent:#1f6feb; --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Noto Sans JP, sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 1rem; }
+    h1, h2, h3 { margin: 0.6rem 0; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    label { font-weight: 600; display: block; margin: 0.4rem 0 0.2rem; }
+    input[type="text"], input[type="number"], textarea, select {
+      width: 100%; box-sizing: border-box; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; font-family: var(--mono);
     }
-    .input-field { margin-bottom: 10px; }
-    .input-field input { width: 100%; padding: 8px; box-sizing: border-box; }
-    .button {
-      padding: 10px 20px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
+    textarea { min-height: 6rem; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 0.75rem; }
+    button {
+      background: var(--accent); color: white; border: none; border-radius: 6px; padding: 0.6rem 1rem; cursor: pointer; font-weight: 700;
     }
-    .button:hover { background-color: #0056b3; }
-    .result {
-      margin-top: 20px;
-      padding: 10px;
-      background-color: #e9ecef;
-      border-radius: 4px;
-    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    pre, code { font-family: var(--mono); }
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.92rem; }
+    th, td { border-bottom: 1px solid #eee; padding: 0.35rem 0.4rem; text-align: left; vertical-align: top; }
+    .nowrap { white-space: nowrap; }
+    .right { text-align: right; }
+    .small { font-size: 0.9rem; }
+    .badge { display: inline-block; padding: 0.1rem 0.4rem; border: 1px solid #ddd; border-radius: 999px; font-size: 0.8rem; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .error { color: #b42318; font-weight: 700; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>MethodDka (50桁版)</h1>
-    <div class="input-field">
-      <label for="maxDegree">最高次数:</label>
-      <input type="number" id="maxDegree" />
+  <h1>Aberth法（最大次数1000）高精度 多項式根計算</h1>
+  <p class="muted">係数は「最高次→定数項」の順で入力。例: x^5 - 3x + 1 は「1, 0, 0, 0, -3, 1」</p>
+
+  <div class="row">
+    <div class="card" style="flex: 1 1 420px; min-width: 320px;">
+      <h2>入力</h2>
+      <label for="coeffs">係数（カンマ/スペース区切り、最高次→定数項）</label>
+      <textarea id="coeffs">1, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1</textarea>
+      <div class="muted">既定は x^10 - 1（10個の11次根）。最大次数は 1000。</div>
+
+      <div class="controls" style="margin-top: 0.75rem;">
+        <div>
+          <label for="precision">精度（桁）</label>
+          <input id="precision" type="number" value="60" min="30" max="200" step="1" />
+        </div>
+        <div>
+          <label for="maxIter">最大反復回数</label>
+          <input id="maxIter" type="number" value="2000" min="50" max="10000" step="10" />
+        </div>
+        <div>
+          <label for="tolF">残差許容 |f(z)|</label>
+          <input id="tolF" type="text" value="1e-40" />
+        </div>
+        <div>
+          <label for="tolStep">相対ステップ許容</label>
+          <input id="tolStep" type="text" value="1e-38" />
+        </div>
+        <div>
+          <label for="clusterRel">クラスタ相対半径</label>
+          <input id="clusterRel" type="text" value="5e-8" />
+        </div>
+        <div>
+          <label for="damping">減衰（0=OFF, 1=ON）</label>
+          <select id="damping">
+            <option value="1" selected>ON</option>
+            <option value="0">OFF</option>
+          </select>
+        </div>
+        <div>
+          <label for="dampFac">減衰係数</label>
+          <input id="dampFac" type="number" value="0.75" min="0.1" max="1.0" step="0.05" />
+        </div>
+        <div>
+          <label for="digitsOut">表示桁（有効桁）</label>
+          <input id="digitsOut" type="number" value="25" min="6" max="80" step="1" />
+        </div>
+        <div>
+          <label for="verbose">ログ</label>
+          <select id="verbose">
+            <option value="0" selected>OFF</option>
+            <option value="1">ON</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top: 0.8rem; display: flex; gap: 0.5rem; align-items: center;">
+        <button id="run">解く</button>
+        <button id="example1" class="badge">例: (x-1)^3 (x+2)^2 (x^5-3x+1)</button>
+        <span id="status" class="muted"></span>
+      </div>
+      <div id="err" class="error" style="margin-top: 0.6rem;"></div>
     </div>
-    <button class="button" onclick="createFields()">最高次数を設定</button>
-    <div id="coefficients"></div>
-    <button class="button" onclick="calculate()">計算開始</button>
-    <div id="results"></div>
+
+    <div class="card" style="flex: 2 1 560px; min-width: 360px;">
+      <h2>結果</h2>
+      <div id="summary" class="small"></div>
+      <div style="overflow: auto; max-height: 65vh; margin-top: 0.5rem;">
+        <table id="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>mult</th>
+              <th>z ≈ (有効桁表示)</th>
+              <th class="right">|z|</th>
+              <th class="right">residual</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <details style="margin-top: 0.6rem;">
+        <summary>詳細（raw roots / ログ）</summary>
+        <div class="grid2">
+          <div>
+            <h3>raw roots</h3>
+            <pre id="raw" class="small"></pre>
+          </div>
+          <div>
+            <h3>ログ</h3>
+            <pre id="logs" class="small"></pre>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
 
-<script>
-Decimal.set({ precision: 50 })
+  <!-- Decimal.js -->
+  <script src="https://cdn.jsdelivr.net/npm/decimal.js@10.4.3/decimal.min.js"></script>
 
-let n;
-let sa = [];
-let sr = [];
-let si = [];
-let bSyuusoku = false;
+  <script>
+    // ===== Utilities =====
+    function d(x) { return x instanceof Decimal ? x : new Decimal(x); }
+    function dmax(a,b){ return a.gt(b) ? a : b; }
+    function dabs(x){ return x.abs(); }
 
-function createFields() {
-  const maxDegree = document.getElementById('maxDegree').value;
-  n = parseInt(maxDegree);
-  const coefficientsDiv = document.getElementById('coefficients');
-  coefficientsDiv.innerHTML = '';
-  for (let i = 0; i <= n; i++) {
-    const inputField = document.createElement('div');
-    inputField.className = 'input-field';
-    inputField.innerHTML = `<label for="coefficient${i}">${n - i}次の係数:</label><input type="text" id="coefficient${i}" />`;
-    coefficientsDiv.appendChild(inputField);
-  }
-}
-
-function calculate() {
-  for (let i = 0; i <= n; i++) {
-    const coefficient = document.getElementById(`coefficient${i}`).value;
-    sa[i] = new Decimal(coefficient || "0");
-  }
-  if (n === 0) {
-    alert('0次の係数を設定してください。');
-    return;
-  }
-  subroutine();
-  const resultsDiv = document.getElementById('results');
-  resultsDiv.innerHTML = '';
-  if (!bSyuusoku) {
-    alert('収束しませんでした。');
-  } else {
-    for (let i = 1; i <= n; i++) {
-      const result = document.createElement('div');
-      result.className = 'result';
-      result.innerText = `解${i}: 実数部 ${sr[i].toString()}, 虚数部 ${si[i].toString()}`;
-      resultsDiv.appendChild(result);
+    class Cx {
+      constructor(re, im) { this.re = d(re); this.im = d(im); }
+      static zero(){ return new Cx(0,0); }
+      static one(){ return new Cx(1,0); }
+      static fromReal(x){ return new Cx(d(x), 0); }
+      clone(){ return new Cx(this.re, this.im); }
+      add(y){ return new Cx(this.re.plus(y.re), this.im.plus(y.im)); }
+      sub(y){ return new Cx(this.re.minus(y.re), this.im.minus(y.im)); }
+      neg(){ return new Cx(this.re.neg(), this.im.neg()); }
+      mul(y){
+        const ar=this.re, ai=this.im, br=y.re, bi=y.im;
+        return new Cx(ar.mul(br).minus(ai.mul(bi)), ar.mul(bi).plus(ai.mul(br)));
+      }
+      inv(){
+        const den = this.re.mul(this.re).plus(this.im.mul(this.im));
+        if (den.isZero()) throw new Error('Division by zero in complex inverse');
+        return new Cx(this.re.div(den), this.im.neg().div(den));
+      }
+      div(y){ return this.mul(y.inv()); }
+      conj(){ return new Cx(this.re, this.im.neg()); }
+      abs(){ return this.re.mul(this.re).plus(this.im.mul(this.im)).sqrt(); }
+      norm(){ return this.re.mul(this.re).plus(this.im.mul(this.im)); }
+      scaleReal(s){ s=d(s); return new Cx(this.re.mul(s), this.im.mul(s)); }
+      toSig(dp=20){
+        const re = this.re.toSignificantDigits(dp).toString();
+        const im = this.im.toSignificantDigits(dp).toString();
+        const sign = this.im.isNeg() ? ' - ' : ' + ';
+        const aim = dabs(this.im).toSignificantDigits(dp).toString();
+        return re + sign + aim + 'i';
+      }
     }
-  }
-}
+    function expi(theta){
+      const c=Math.cos(theta), s=Math.sin(theta);
+      return new Cx(new Decimal(c), new Decimal(s));
+    }
+    function cdist(z,w){ return z.sub(w).abs(); }
 
-function subroutine() {
-  let sx = Array(n+1).fill(new Decimal(0));
-  let sy = Array(n+1).fill(new Decimal(0));
-  let se = new Decimal("1e-50");
-  let m = 100;
-  let sp = Decimal.acos(-1);
-  let sw = new Decimal(0);
+    class Poly {
+      constructor(coeffsDesc){
+        const arr = coeffsDesc.map(d);
+        let i=0; while(i<arr.length-1 && arr[i].isZero()) i++;
+        this.coeff = arr.slice(i);
+        this.n = this.coeff.length - 1;
+        if (this.n < 0) { this.n = 0; this.coeff = [d(0)]; }
+      }
+      degree(){ return this.n; }
+      toMonic(){
+        const a = this.coeff[0];
+        if (a.isZero()) throw new Error('Leading coefficient is zero');
+        if (!a.eq(1)) this.coeff = this.coeff.map(c => c.div(a));
+        return a;
+      }
+      maxCoeffAbs(excludeLeading=false){
+        const start = excludeLeading ? 1 : 0;
+        let m=d(0);
+        for(let i=start;i<this.coeff.length;i++) m = dmax(m, dabs(this.coeff[i]));
+        return m;
+      }
+      vietaCenter(){
+        if (this.n===0) return d(0);
+        const an1 = this.coeff[1] || d(0);
+        return an1.neg().div(this.n);
+      }
+      cauchyRadius(){
+        const m=this.maxCoeffAbs(true);
+        return m.plus(1);
+      }
+      evalCx(z){
+        let y = new Cx(this.coeff[0], 0);
+        for (let i=1;i<this.coeff.length;i++) y = y.mul(z).add(Cx.fromReal(this.coeff[i]));
+        return y;
+      }
+      evalAndDerivCx(z){
+        const a=this.coeff;
+        let b = new Cx(a[0],0);
+        let c = Cx.zero();
+        for(let i=1;i<a.length;i++){
+          c = c.mul(z).add(b);
+          b = b.mul(z).add(Cx.fromReal(a[i]));
+        }
+        return { f:b, fp:c };
+      }
+      derivative(){
+        if (this.n===0) return new Poly([0]);
+        const out=[];
+        const N=this.n;
+        for(let i=0;i<N;i++) out.push(this.coeff[i].mul(N - i));
+        return new Poly(out);
+      }
+    }
 
-  for (let i = 0; i <= n; i++) {
-    sa[i] = sa[i].div(sa[0]);
-  }
+    const DefaultConfig = {
+      precisionDigits: 60,
+      maxIterations: 2000,
+      tolResidual: '1e-40',
+      tolStepRel: '1e-38',
+      clusterRel: '5e-8',
+      enableDamping: true,
+      dampingFactor: 0.75,
+      verbose: false
+    };
 
-  for (let i = 2; i <= n; i++) {
-    let sq = new Decimal(n).mul(sa[i].abs().pow(new Decimal(1).div(i)));
-    if (sw.lt(sq)) sw = sq;
-  }
-
-  let sb = sp.mul(2).div(n);
-  let sc = sp.div(2 * n);
-
-  for (let j = 1; j <= n; j++) {
-    let st = sb.mul(j - 1).add(sc);
-    sr[j] = sw.mul(Decimal.cos(st));
-    si[j] = sw.mul(Decimal.sin(st));
-  }
-
-  for (let k = 1; k <= m; k++) {
-    let bContinue = false;
-
-    for (let i = 1; i <= n; i++) {
-      let s1 = new Decimal(1);
-      let s2 = new Decimal(0);
-      let s3 = new Decimal(1);
-      let s4 = new Decimal(0);
-
-      sb = sr[i];
-      sc = si[i];
-
-      for (let j = 1; j <= n; j++) {
-        let s5 = s1.mul(sb).sub(s2.mul(sc));
-        s2 = s1.mul(sc).add(s2.mul(sb));
-        s1 = s5.add(sa[j]);
-
-        if (j !== i) {
-          s5 = s3.mul(sb.sub(sr[j])).sub(s4.mul(sc.sub(si[j])));
-          s4 = s3.mul(sc.sub(si[j])).add(s4.mul(sb.sub(sr[j])));
-          s3 = s5;
+    class AberthSolver {
+      constructor(cfg = {}) {
+        this.cfg = { ...DefaultConfig, ...cfg };
+        if (this.cfg.precisionDigits) {
+          Decimal.set({ precision: this.cfg.precisionDigits, toExpNeg: -1e6, toExpPos: 1e6, rounding: Decimal.ROUND_HALF_EVEN });
         }
       }
+      solve(coeffsDesc){
+        const P = new Poly(coeffsDesc);
+        if (P.degree() < 1) {
+          return { roots: [], rawRoots: [], details: { degree: P.degree(), note:'Constant polynomial: no finite roots.' } };
+        }
+        if (P.degree() > 1000) throw new Error(`Degree ${P.degree()} exceeds supported maximum of 1000`);
 
-      sw = s3.pow(2).add(s4.pow(2));
-      sx[i] = s1.mul(s3).add(s2.mul(s4)).div(sw);
-      sy[i] = s2.mul(s3).sub(s1.mul(s4)).div(sw);
-      sr[i] = sr[i].sub(sx[i]);
-      si[i] = si[i].sub(sy[i]);
+        const lead = P.toMonic();
+        const maxAbs = P.maxCoeffAbs();
+        if (!maxAbs.isZero() && !maxAbs.eq(1)) {
+          const scaled=[d(1)];
+          for (let i=1;i<P.coeff.length;i++) scaled.push(P.coeff[i].div(maxAbs));
+          P.coeff = scaled;
+        }
 
-      if (sx[i].abs().gt(se) || sy[i].abs().gt(se)) {
-        bContinue = true;
+        const z0 = this.initialGuesses(P);
+        const { z, iters, convergedMask, logs } = this.aberthIterate(P, z0);
+
+        const raw = z.map(zk => {
+          const fz = P.evalCx(zk);
+          return { z: zk, residual: fz.abs() };
+        });
+        const clustered = this.clusterRoots(raw);
+
+        const details = {
+          degree: P.degree(),
+          leadCoefficient: lead.toString(),
+          iterations: iters,
+          convergedCount: convergedMask.reduce((a,b)=>a+(b?1:0),0),
+          config: this.cfg,
+          logs: this.cfg.verbose ? logs : undefined
+        };
+        return { roots: clustered, rawRoots: raw, details };
+      }
+      initialGuesses(P){
+        const n = P.degree();
+        const center = P.vietaCenter();
+        const R = P.cauchyRadius();
+        const twoPi = 2*Math.PI;
+        const layers = Math.max(1, Math.floor(Math.log2(n + 1)));
+        const radii=[];
+        for (let i=0;i<layers;i++){
+          const t = layers===1 ? 0.9 : (0.7 + 0.4*(i/(layers-1)));
+          radii.push(R.mul(t));
+        }
+        const z = new Array(n);
+        let k=0;
+        for(let li=0; li<radii.length && k<n; li++){
+          const r=radii[li];
+          const mOnLayer = Math.ceil((n-k)/(radii.length - li));
+          for(let j=0;j<mOnLayer && k<n;j++,k++){
+            const theta = twoPi * (k + 0.25) / n;
+            const unit = expi(theta);
+            const zr = unit.scaleReal(r);
+            zr.re = zr.re.plus(center);
+            z[k]=zr;
+          }
+        }
+        return z;
+      }
+      aberthIterate(P, z0){
+        const n = z0.length;
+        const z = z0.map(zi => zi.clone());
+        const converged = new Array(n).fill(false);
+        const cfg = this.cfg;
+        const tolF = d(cfg.tolResidual);
+        const tolStepRel = d(cfg.tolStepRel);
+        const logs = [];
+        let it=0;
+        for(; it<cfg.maxIterations; it++){
+          let allOK = true;
+
+          const f = new Array(n);
+          const fp = new Array(n);
+          for(let k=0;k<n;k++){
+            const { f:fk, fp:fpk } = P.evalAndDerivCx(z[k]);
+            f[k]=fk; fp[k]=fpk;
+          }
+
+          let maxRelStep = d(0);
+          let maxRes = d(0);
+
+          for(let k=0;k<n;k++){
+            if (converged[k]) continue;
+
+            const fk = f[k], fpk = fp[k];
+            const absf = fk.abs();
+            maxRes = dmax(maxRes, absf);
+
+            let w;
+            const absfp = fpk.abs();
+            if (absfp.isZero()) {
+              const ang = 2*Math.PI * ((k*97) % (n+17)) / (n+17);
+              const nudge = expi(ang).scaleReal('1e-20');
+              z[k] = z[k].add(nudge);
+              allOK = false;
+              continue;
+            } else {
+              w = fk.div(fpk);
+            }
+
+            let sum = Cx.zero();
+            const zk = z[k];
+            for(let j=0;j<n;j++){
+              if (j===k) continue;
+              const diff = zk.sub(z[j]);
+              const r = diff.abs();
+              if (r.isZero()) {
+                const ang = 2*Math.PI * ((k+j+13) % (n+23)) / (n+23);
+                const eps = expi(ang).scaleReal('1e-30');
+                z[j] = z[j].add(eps);
+              } else {
+                sum = sum.add(diff.inv());
+              }
+            }
+
+            const denom = Cx.one().sub(w.mul(sum));
+            let step;
+            if (denom.abs().lt('1e-30')) step = w; else step = w.div(denom);
+
+            let stepMag = step.abs();
+            const denomRel = z[k].abs().plus(1);
+            let relStep = stepMag.div(denomRel);
+            if (cfg.enableDamping && relStep.gt(0.5)) {
+              const scale = d(cfg.dampingFactor).div(relStep.plus(1));
+              step = step.scaleReal(scale);
+              stepMag = step.abs();
+              relStep = stepMag.div(denomRel);
+            }
+
+            z[k] = z[k].sub(step);
+
+            const ok = absf.lte(tolF) && relStep.lte(tolStepRel);
+            converged[k] = ok;
+            allOK = allOK && ok;
+
+            if (relStep.gt(maxRelStep)) maxRelStep = relStep;
+          }
+
+          if (cfg.verbose) {
+            logs.push({
+              iter: it,
+              maxResidual: maxRes.toString(),
+              maxRelStep: maxRelStep.toString(),
+              converged: converged.reduce((a,b)=>a+(b?1:0),0)
+            });
+          }
+
+          if (allOK) break;
+        }
+
+        return { z, iters: it, convergedMask: converged, logs };
+      }
+      clusterRoots(raw){
+        const rel = d(this.cfg.clusterRel);
+        const n = raw.length;
+        const used = new Array(n).fill(false);
+        const clusters = [];
+        for(let i=0;i<n;i++){
+          if (used[i]) continue;
+          const zi = raw[i].z;
+          const scalei = zi.abs().plus(1);
+          const Ri = scalei.mul(rel);
+          const members=[i];
+          used[i]=true;
+          for(let j=i+1;j<n;j++){
+            if (used[j]) continue;
+            const zj = raw[j].z;
+            const dist = cdist(zi, zj);
+            const scalej = zj.abs().plus(1);
+            const Rj = scalej.mul(rel);
+            const R = dmax(Ri, Rj);
+            if (dist.lte(R)) {
+              used[j]=true;
+              members.push(j);
+            }
+          }
+          let sumW=d(0), sumRe=d(0), sumIm=d(0), maxRes=d(0);
+          for(const idx of members){
+            const r = raw[idx];
+            const w = r.residual.isZero() ? d('1e30') : d(1).div(r.residual);
+            sumW = sumW.plus(w);
+            sumRe = sumRe.plus(r.z.re.mul(w));
+            sumIm = sumIm.plus(r.z.im.mul(w));
+            if (r.residual.gt(maxRes)) maxRes = r.residual;
+          }
+          const re = sumW.isZero() ? zi.re : sumRe.div(sumW);
+          const im = sumW.isZero() ? zi.im : sumIm.div(sumW);
+          clusters.push({ value: new Cx(re, im), multiplicity: members.length, residual: maxRes });
+        }
+        clusters.sort((a,b)=> a.value.abs().cmp(b.value.abs()));
+        return clusters;
       }
     }
 
-    if (!bContinue) {
-      bSyuusoku = true;
-      alert('収束しました。');
-      return;
-    }
-  }
+    // ===== UI Logic =====
+    const el = id => document.getElementById(id);
+    const coeffsEl = el('coeffs');
+    const precisionEl = el('precision');
+    const maxIterEl = el('maxIter');
+    const tolFEl = el('tolF');
+    const tolStepEl = el('tolStep');
+    const clusterRelEl = el('clusterRel');
+    const dampingEl = el('damping');
+    const dampFacEl = el('dampFac');
+    const digitsOutEl = el('digitsOut');
+    const verboseEl = el('verbose');
+    const runBtn = el('run');
+    const statusEl = el('status');
+    const errEl = el('err');
+    const tableBody = el('table').querySelector('tbody');
+    const summaryEl = el('summary');
+    const rawEl = el('raw');
+    const logsEl = el('logs');
+    const example1Btn = el('example1');
 
-  bSyuusoku = false;
-}
-</script>
+    function parseCoeffs(input){
+      const tokens = input
+        .replace(/[;\n]/g, ' ')
+        .split(/[\s,]+/)
+        .map(s => s.trim())
+        .filter(s => s.length>0);
+      if (tokens.length < 2) throw new Error('係数が不足しています（少なくとも2個必要）。');
+      const arr = tokens.map(s => {
+        if (!/^[-+]?(\d+(\.\d*)?|\.\d+)(e[-+]?\d+)?$/i.test(s)) {
+          // 許容: Decimal は大きな指数もOK。ここでは軽い検証。
+        }
+        return s;
+      });
+      return arr;
+    }
+
+    function fmtDecimal(x, sig=25){ return d(x).toSignificantDigits(sig).toString(); }
+
+    function renderResult(res, digits){
+      // Summary
+      const deg = res.details.degree;
+      const iter = res.details.iterations;
+      const conv = res.details.convergedCount;
+      summaryEl.innerHTML =
+        `<div>degree: <b>${deg}</b> | iterations: <b>${iter}</b> | converged: <b>${conv}/${deg}</b></div>` +
+        `<div class="muted">lead coeff (before monic): ${res.details.leadCoefficient}</div>`;
+
+      // Table
+      tableBody.innerHTML = '';
+      res.roots.forEach((r, idx) => {
+        const tr = document.createElement('tr');
+        const z = r.value;
+        const absz = z.abs();
+        const tds = [
+          `<td class="nowrap">${idx+1}</td>`,
+          `<td class="nowrap">${r.multiplicity}</td>`,
+          `<td><code>${z.toSig(digits)}</code></td>`,
+          `<td class="right nowrap">${fmtDecimal(absz, digits)}</td>`,
+          `<td class="right nowrap">${fmtDecimal(r.residual, Math.min(digits, 30))}</td>`
+        ];
+        tr.innerHTML = tds.join('');
+        tableBody.appendChild(tr);
+      });
+
+      // Raw roots
+      rawEl.textContent = res.rawRoots
+        .map((r,i)=>`${(i+1).toString().padStart(3,' ')}: z≈ ${r.z.toSig(digits)} |f(z)|≈ ${fmtDecimal(r.residual, Math.min(digits,30))}`)
+        .join('\n');
+
+      // Logs
+      if (res.details.logs) {
+        logsEl.textContent = res.details.logs.map(l => JSON.stringify(l)).join('\n');
+      } else {
+        logsEl.textContent = '(ログOFF)';
+      }
+    }
+
+    async function run(){
+      errEl.textContent = '';
+      statusEl.textContent = '計算中...';
+      runBtn.disabled = true;
+
+      try {
+        const coeffs = parseCoeffs(coeffsEl.value);
+        const degree = coeffs.length - 1;
+        if (degree < 1) throw new Error('次数が1未満です。');
+        if (degree > 1000) throw new Error(`次数 ${degree} は上限1000を超えています。`);
+
+        const precisionDigits = parseInt(precisionEl.value, 10) || 60;
+        const maxIterations = parseInt(maxIterEl.value, 10) || 2000;
+        const tolResidual = tolFEl.value || '1e-40';
+        const tolStepRel = tolStepEl.value || '1e-38';
+        const clusterRel = clusterRelEl.value || '5e-8';
+        const enableDamping = dampingEl.value === '1';
+        const dampingFactor = parseFloat(dampFacEl.value) || 0.75;
+        const verbose = verboseEl.value === '1';
+
+        Decimal.set({ precision: precisionDigits, toExpNeg: -1e6, toExpPos: 1e6, rounding: Decimal.ROUND_HALF_EVEN });
+
+        const solver = new AberthSolver({
+          precisionDigits,
+          maxIterations,
+          tolResidual,
+          tolStepRel,
+          clusterRel,
+          enableDamping,
+          dampingFactor,
+          verbose
+        });
+
+        const t0 = performance.now();
+        const res = await new Promise(resolve => {
+          // 計算をイベントループに解放
+          setTimeout(()=> resolve(solver.solve(coeffs)), 10);
+        });
+        const t1 = performance.now();
+
+        statusEl.textContent = `完了 (${(t1 - t0).toFixed(0)} ms)`;
+        renderResult(res, parseInt(digitsOutEl.value,10) || 25);
+      } catch (e) {
+        console.error(e);
+        errEl.textContent = e.message || String(e);
+        statusEl.textContent = '';
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', run);
+
+    example1Btn.addEventListener('click', ()=>{
+      // (x - 1)^3 (x + 2)^2 (x^5 - 3x + 1)
+      function polyMulAsc(A,B){
+        const out = Array(A.length + B.length - 1).fill(0).map(()=>d(0));
+        for(let i=0;i<A.length;i++) for(let j=0;j<B.length;j++) out[i+j] = out[i+j].plus(d(A[i]).mul(d(B[j])));
+        return out;
+      }
+      function polyPowLinearAsc(root, m){ // (x - root)^m, ascending
+        let p = [d(1), d(root).neg()];
+        let r = [d(1)];
+        for(let i=0;i<m;i++) r = polyMulAsc(r,p);
+        return r;
+      }
+      let p = polyPowLinearAsc(1,3);
+      p = polyMulAsc(p, polyPowLinearAsc(-2,2));
+      const q = [d(1), d(0), d(0), d(0), d(-3), d(1)]; // x^5 - 3x + 1
+      p = polyMulAsc(p, q);
+      const desc = p.slice().reverse().map(x=>x.toString());
+      coeffsEl.value = desc.join(', ');
+    });
+
+    // 初回自動実行
+    setTimeout(run, 50);
+  </script>
 </body>
 </html>
